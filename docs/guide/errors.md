@@ -1,0 +1,65 @@
+---
+url: /site/guide/errors.md
+description: Error response shape and HTTP status codes used by the Civitai site API.
+---
+
+> Documentation index: https://developer.civitai.com/llms.txt — every page on this site has a markdown version at its URL + `.md`.
+
+# Errors
+
+## Response shape
+
+Most errors come back as a single-field JSON object:
+
+```json
+{ "error": "descriptive message" }
+```
+
+Some errors originate inside the internal tRPC layer and get forwarded with a
+richer shape:
+
+```json
+{
+  "code": "UNAUTHORIZED",
+  "message": "descriptive message",
+  "issues": [ /* optional Zod validation details */ ]
+}
+```
+
+Either way, inspect the HTTP status code first and use the body for a
+human-readable explanation.
+
+::: tip Hit this through the `civitai` CLI rather than the REST API?
+The CLI turns these statuses into **exit codes** and its own messages, and the
+mapping is not one-to-one — one `429` is exit `2`, another is exit `6`. Look the
+message you got up on
+[CLI troubleshooting](https://developer.civitai.com/site/guide/cli-troubleshooting.md), which is indexed by the string the
+binary prints.
+:::
+
+## Status codes
+
+| Status | Meaning | Typical cause |
+|--------|---------|---------------|
+| **200** | OK | Successful read. |
+| **400** | Bad Request | Invalid query parameters. For list endpoints, response body includes Zod-style validation issues. Combining `?query=` with `?page=` also returns 400. |
+| **401** | Unauthorized | Missing or invalid token on an `Authenticated` endpoint, or an auth-only filter (e.g. `?favorites=true`) on a `Mixed` endpoint without a session. |
+| **403** | Forbidden | Valid token, but the user is not permitted to access the resource. |
+| **404** | Not Found | Unknown model, version, or hash. Body shape: `{"error": "No model with id 0"}`. |
+| **405** | Method Not Allowed | Wrong HTTP verb for the endpoint. |
+| **429** | Too Many Requests | Either edge rate limiting (Cloudflare) or the `page * limit > 1000` pagination cap — see [Pagination](https://developer.civitai.com/site/guide/pagination.md). |
+| **500** | Internal Server Error | Unexpected failure. Safe to retry with backoff. |
+
+## Retries
+
+The API does not expose a `Retry-After` header for most failures. For 5xx and
+429 responses, apply exponential backoff starting at ~1 second and cap at
+\~30 seconds. Don't retry 4xx responses other than 429 — the request shape
+itself is the problem.
+
+## Rate limits
+
+There is no per-endpoint rate limit exposed as a stable contract. Cloudflare
+enforces edge limits (generic DDoS / abuse protection) in front of the API;
+those are operational, not a published SLA. Treat unexpected 429s as a signal
+to back off, not as a scheme to code against.

@@ -1,0 +1,143 @@
+---
+url: /site/oauth/scopes.md
+description: >-
+  The full scope bitmask used by Civitai OAuth tokens, plus the four presets
+  exposed in the app-registration UI.
+---
+
+> Documentation index: https://developer.civitai.com/llms.txt — every page on this site has a markdown version at its URL + `.md`.
+
+# OAuth Scopes
+
+Civitai OAuth scopes are bitwise flags. To request multiple scopes, OR them
+together and pass the **decimal integer** as the `scope` parameter on the
+`/authorize` URL.
+
+```text
+scope = UserRead | AIServicesRead | AIServicesWrite | BuzzRead
+      = 1 | 16384 | 32768 | 65536
+      = 114689
+```
+
+## Scope reference
+
+| Bit | Value | Scope | What it grants |
+|---:|---:|---|---|
+| 0 | 1 | `UserRead` | Read profile, settings & email **(always granted)** |
+| 1 | 2 | `UserWrite` | Update profile & settings |
+| 2 | 4 | `ModelsRead` | Browse & download models |
+| 3 | 8 | `ModelsWrite` | Upload & edit models |
+| 4 | 16 | `ModelsDelete` | Delete models |
+| 5 | 32 | `MediaRead` | View images, videos & posts |
+| 6 | 64 | `MediaWrite` | Upload media & create posts |
+| 7 | 128 | `MediaDelete` | Delete media & posts |
+| 8 | 256 | `ArticlesRead` | Read articles |
+| 9 | 512 | `ArticlesWrite` | Create & edit articles |
+| 10 | 1 024 | `ArticlesDelete` | Delete articles |
+| 11 | 2 048 | `BountiesRead` | View bounties |
+| 12 | 4 096 | `BountiesWrite` | Create & manage bounties **(buzz spend)** |
+| 13 | 8 192 | `BountiesDelete` | Delete bounties |
+| 14 | 16 384 | `AIServicesRead` | View generation & training history |
+| 15 | 32 768 | `AIServicesWrite` | Generate, train & scan **(buzz spend)** |
+| 16 | 65 536 | `BuzzRead` | View buzz balance & history |
+| 17 | 131 072 | `CollectionsRead` | View collections |
+| 18 | 262 144 | `CollectionsWrite` | Manage collections |
+| 19 | 524 288 | `SocialWrite` | Follow, react, comment & review |
+| 20 | 1 048 576 | `SocialTip` | *Reserved — see below* |
+| 21 | 2 097 152 | `NotificationsRead` | Read notifications |
+| 22 | 4 194 304 | `NotificationsWrite` | Manage notification preferences |
+| 23 | 8 388 608 | `VaultRead` | View vault |
+| 24 | 16 777 216 | `VaultWrite` | Manage vault |
+| 25 | 33 554 432 | `AppBlocksSubmit` | Manage your Apps: submit versions, pull source, test locally, edit listings, view analytics and respond to user feedback *(opt-in)* |
+| 26 | 67 108 864 | `AppBlocksDevTunnel` | Open on-site dev tunnels *(opt-in)* |
+| 27 | 134 217 728 | `LinkConnect` | Connect the Civitai Link app to your account *(opt-in)* |
+| 28 | 268 435 456 | `AppStoreCatalogWrite` | Publish items to the app's App Store listing — see [catalog sync](https://developer.civitai.com/apps/guide/catalog-sync.md) *(opt-in; `client_credentials` grant only)* |
+| — | 33 554 431 | `Full` | Bits 0–24 |
+
+Bits 25–28 are **opt-in** scopes. They are not part of `Full`, and a client can
+obtain one only if it is registered with it in its allowed scopes (the
+first-party `civitai` CLI requests bits 25 and 26 by default).
+`AppStoreCatalogWrite` is issued only through the `client_credentials` grant:
+`/authorize` refuses any request carrying it with `invalid_scope`. What it is
+for, and how to mint and use it, is on
+[App Store catalog sync](https://developer.civitai.com/apps/guide/catalog-sync.md).
+
+## `UserRead` is always granted
+
+`UserRead` is a mandatory baseline: every token Civitai issues includes it,
+no matter what you request on `/authorize`. An app acting on a user's behalf
+always needs to know whose account it's on, so the bit can't be dropped. This
+is why the [`/userinfo`](https://developer.civitai.com/site/oauth/endpoints.md#get-api-auth-oauth-userinfo) endpoint
+(including the user's `email`) always works.
+
+You don't need to add `UserRead` to your `scope` parameter explicitly — but
+including it does no harm, and the consent screen always shows it.
+
+## Buzz-spend scopes
+
+Two scopes carry an implicit buzz-spend authorization — granting them
+lets your app draw from the user's buzz balance:
+
+* **`AIServicesWrite`** — every generation/training/scan request the app
+  makes is billed to the consenting user. This is the only scope subject
+  to the per-app [buzz limit](https://developer.civitai.com/site/oauth/buzz-limits.md) cap users can set at consent.
+* **`BountiesWrite`** — bounty creation costs buzz at post time. Spend is
+  gated by the user's overall balance only; per-app caps don't apply.
+
+(`SocialTip` would be a third — see the reserved note below.)
+
+Pair either with **`BuzzRead`** if you want to surface the user's
+remaining balance in your UI before a spend.
+
+::: warning SocialTip is currently reserved
+The `SocialTip` bit is defined in the scope enum but every server endpoint
+that requires it (tipping, donation goals, event tipping) is gated by
+`blockApiKeys: true`, which denies all API-key and OAuth callers
+regardless of scope. Granting `SocialTip` today is a no-op. The bit stays
+reserved (and locked at 1<<20) so we don't reshuffle the bitmask when
+tipping is unblocked for OAuth in the future.
+:::
+
+## Presets
+
+The app-registration UI exposes four convenience presets. You can also
+target them from the `scope` URL parameter directly:
+
+| Preset | Decimal | Scopes |
+|---|---:|---|
+| **Read Only** | 10 701 093 | All `*Read` scopes |
+| **Creator** | 11 492 205 | Read Only + Models / Media / Articles / Bounties / Collections Write + SocialWrite |
+| **AI Services** | 114 689 | `UserRead` | `AIServicesRead` | `AIServicesWrite` | `BuzzRead` |
+| **Full Access** | 33 554 431 | Every scope in bits 0–24 (not the opt-in bits) |
+
+Use a preset's number on `/authorize` and the consent screen will still show
+the user every flag underneath — there's no shortcut around per-scope consent.
+
+## Asking for less than you registered
+
+The `allowedScopes` you set during [registration](https://developer.civitai.com/site/oauth/register-app.md) is a
+ceiling, not a floor. You can ask for any subset of those bits on any
+individual `/authorize` call — useful when one user only needs read access
+but another wants to spend buzz, and you want a single registered app for
+both.
+
+If you request a scope bit your app isn't registered for, the user is
+shown the consent screen anyway but Civitai will trim the token to your
+allowed scopes when it issues it. Read the `scope` value back from the
+token-endpoint response — it's authoritative.
+
+## Checking scopes at the API boundary
+
+Pass the access token as `Authorization: Bearer <token>` on any Civitai
+endpoint. The endpoint returns `403 insufficient_scope` if the token's
+scope is missing the bit it requires:
+
+```json
+{
+  "error": "insufficient_scope",
+  "error_description": "Token does not have ModelsWrite scope"
+}
+```
+
+That's the signal to re-run the flow with a wider scope (or, more often,
+to display "this action needs additional permissions" in your UI).
